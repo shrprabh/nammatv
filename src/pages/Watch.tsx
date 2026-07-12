@@ -30,6 +30,34 @@ function hostnameOf(url: string): string {
   }
 }
 
+function isIOS(): boolean {
+  return (
+    /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    // iPadOS 13+ reports itself as a Mac but has a touchscreen
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+}
+
+/**
+ * VLC isn't bound by the browser's mixed-content and CORS rules, so
+ * "external player" streams play there.
+ * iOS: VLC registers the x-callback scheme — one tap streams directly.
+ * Desktop: no vlc:// protocol exists out of the box, but VLC owns the .m3u
+ * file association, so we hand over a tiny generated playlist file instead.
+ */
+function vlcXCallbackHref(url: string): string {
+  return `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(url)}`
+}
+
+function m3uDataHref(channelName: string, url: string): string {
+  const playlist = `#EXTM3U\n#EXTINF:-1,${channelName}\n${url}\n`
+  return `data:audio/x-mpegurl;charset=utf-8,${encodeURIComponent(playlist)}`
+}
+
+function m3uFileName(channelName: string): string {
+  return `${channelName.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'channel'}.m3u`
+}
+
 function CopyButton({ url }: { url: string }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -116,17 +144,24 @@ function Player({ channel, catalog }: { channel: Channel; catalog: CatalogData }
             <div className="absolute inset-0 grid place-items-center bg-black/85 p-6">
               <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                 <TvOffIcon className="h-10 w-10 text-white/30" />
-                <p className="font-medium">This channel appears to be offline</p>
-                <p className="text-xs leading-relaxed text-white/50">
-                  Public streams come and go — it may be geo-blocked in your region or temporarily
-                  down. Try again, or come back later.
+                <p className="font-medium">
+                  {playableStreams.length === 0
+                    ? 'This channel needs an external player'
+                    : 'This channel appears to be offline'}
                 </p>
-                <button
-                  onClick={retry}
-                  className="mt-1 rounded-full bg-white/10 px-5 py-2 text-sm font-medium transition hover:bg-white/20"
-                >
-                  Retry
-                </button>
+                <p className="text-xs leading-relaxed text-white/50">
+                  {playableStreams.length === 0
+                    ? 'Browsers can’t play its streams — use the “Play in VLC” buttons below the player.'
+                    : 'Public streams come and go — it may be geo-blocked in your region or temporarily down. Try again, or come back later.'}
+                </p>
+                {playableStreams.length > 0 && (
+                  <button
+                    onClick={retry}
+                    className="mt-1 rounded-full bg-white/10 px-5 py-2 text-sm font-medium transition hover:bg-white/20"
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -208,23 +243,66 @@ function Player({ channel, catalog }: { channel: Channel; catalog: CatalogData }
         )}
 
         {externalStreams.length > 0 && (
-          <details className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4">
+          <details
+            open={playableStreams.length === 0}
+            className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4"
+          >
             <summary className="cursor-pointer text-sm font-medium text-white/70">
               {externalStreams.length} more stream{externalStreams.length > 1 ? 's' : ''} for
               external players (VLC)
             </summary>
             <p className="mt-2 text-xs leading-relaxed text-white/45">
-              These streams can’t play in a browser (plain-HTTP or special headers required). Copy a
-              link and open it in VLC → “Open Network Stream”.
+              Web pages can’t play these streams (plain-HTTP or special headers required) — that’s a
+              browser security rule, not a glitch. One tap opens them in the free{' '}
+              <a
+                href="https://www.videolan.org/vlc/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline decoration-white/30 underline-offset-2"
+              >
+                VLC app
+              </a>
+
+              . On iPhone/iPad “Play in VLC” streams with one tap; on a computer, open the
+              downloaded “VLC file” and it starts in VLC. “Direct” opens the raw link, which Safari
+              can often play in its own player.
             </p>
             <div className="mt-3 flex flex-col gap-2">
               {externalStreams.map((s, i) => (
-                <div key={s.url} className="flex items-center justify-between gap-3">
-                  <span className="truncate text-xs text-white/50">
+                <div key={s.url} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                  <span className="min-w-0 flex-1 truncate text-xs text-white/50">
                     Stream {i + 1}
                     {s.quality ? ` · ${s.quality}p` : ''} · {hostnameOf(s.url)}
                   </span>
-                  <CopyButton url={s.url} />
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {isIOS() ? (
+                      <a
+                        href={vlcXCallbackHref(s.url)}
+                        className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white transition hover:bg-white/20"
+                      >
+                        <PlayIcon className="h-3.5 w-3.5" />
+                        Play in VLC
+                      </a>
+                    ) : (
+                      <a
+                        href={m3uDataHref(channel.name, s.url)}
+                        download={m3uFileName(channel.name)}
+                        className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white transition hover:bg-white/20"
+                      >
+                        <PlayIcon className="h-3.5 w-3.5" />
+                        VLC file
+                      </a>
+                    )}
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70 transition hover:border-white/25 hover:text-white"
+                    >
+                      Direct
+                    </a>
+                    <CopyButton url={s.url} />
+                  </span>
                 </div>
               ))}
             </div>
