@@ -48,12 +48,12 @@ jobs:
           path: dist
 
       # GitHub disables scheduled workflows after 60 days without commits;
-      # this keeps the daily refresh alive via the API (no dummy commits).
+      # re-enabling this workflow via the API resets that timer.
       - name: Keepalive
         if: github.event_name == 'schedule'
-        uses: gautamkrishnar/keepalive-workflow@v2
-        with:
-          use_api: true
+        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   deploy:
     needs: build
