@@ -9,14 +9,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # keepalive
+  contents: read
   pages: write
   id-token: write
   actions: write # keepalive via API
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false # queue deploys; never kill one mid-flight
 
 jobs:
   build:

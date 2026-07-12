@@ -157,6 +157,13 @@ const usedCountries = new Set(out.map((c) => c.country))
 const usedLanguages = new Set(out.flatMap((c) => c.languages || []))
 const usedCategories = new Set(out.flatMap((c) => c.categories || []))
 
+// Some channels reference language codes missing from languages.json —
+// keep them selectable by falling back to the raw code as the name.
+const knownLanguages = new Map(languages.map((l) => [l.code, l.name]))
+const languagesOut = [...usedLanguages]
+  .sort()
+  .map((code) => ({ code, name: knownLanguages.get(code) ?? code }))
+
 const data = {
   generatedAt: new Date().toISOString(),
   categories: categories
@@ -165,16 +172,9 @@ const data = {
   countries: countries
     .filter((c) => usedCountries.has(c.code))
     .map((c) => ({ code: c.code, name: c.name, flag: c.flag })),
-  languages: languages
-    .filter((l) => usedLanguages.has(l.code))
-    .map((l) => ({ code: l.code, name: l.name })),
+  languages: languagesOut,
   channels: out,
 }
-
-mkdirSync(OUT_DIR, { recursive: true })
-const tmp = OUT_FILE + '.tmp'
-writeFileSync(tmp, JSON.stringify(data))
-renameSync(tmp, OUT_FILE)
 
 // Build summary — these counts double as a sanity check in CI logs.
 const count = (pred) => out.filter(pred).length
@@ -192,6 +192,15 @@ const summary = {
 console.log('Build summary:', JSON.stringify(summary, null, 2))
 if (excluded.length) console.log('Excluded pay-TV re-streams:', excluded.join(', '))
 
-// Hard sanity gates so CI fails loudly instead of shipping an empty app.
+// Hard sanity gates BEFORE touching the output file, so a bad upstream day
+// leaves the previous snapshot in place (CI then deploys the committed one).
 if (out.length < 1000) throw new Error(`Suspiciously few channels: ${out.length}`)
+if (summary.playableInBrowser < 500)
+  throw new Error(`Suspiciously few playable channels: ${summary.playableInBrowser}`)
 if (summary.kannada === 0) console.warn('WARNING: Kannada row is empty!')
+
+mkdirSync(OUT_DIR, { recursive: true })
+const tmp = OUT_FILE + '.tmp'
+writeFileSync(tmp, JSON.stringify(data))
+renameSync(tmp, OUT_FILE)
+console.log('Wrote', OUT_FILE)

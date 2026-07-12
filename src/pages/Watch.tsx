@@ -18,18 +18,30 @@ import {
   ChevronLeftIcon,
   CopyIcon,
   HeartIcon,
+  PlayIcon,
   TvOffIcon,
 } from '../components/Icons'
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
 
 function CopyButton({ url }: { url: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <button
       onClick={() => {
-        navigator.clipboard?.writeText(url).then(() => {
-          setCopied(true)
-          setTimeout(() => setCopied(false), 1500)
-        })
+        navigator.clipboard
+          ?.writeText(url)
+          .then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1500)
+          })
+          .catch(() => {})
       }}
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70 transition hover:border-white/25 hover:text-white"
     >
@@ -41,10 +53,8 @@ function CopyButton({ url }: { url: string }) {
 
 function Player({ channel, catalog }: { channel: Channel; catalog: CatalogData }) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const { state, playableStreams, externalStreams, retry, switchToStream, unmute } = usePlayer(
-    videoRef,
-    channel,
-  )
+  const { state, playableStreams, externalStreams, retry, switchToStream, tapToPlay, unmute } =
+    usePlayer(videoRef, channel)
   const favorites = useFavorites()
   const isFavorite = favorites.includes(channel.id)
   const country = countryInfo(channel.country)
@@ -88,6 +98,18 @@ function Player({ channel, catalog }: { channel: Channel; catalog: CatalogData }
                 </span>
               </div>
             </div>
+          )}
+
+          {state.status === 'blocked' && (
+            <button
+              onClick={tapToPlay}
+              aria-label="Play"
+              className="absolute inset-0 grid place-items-center bg-black/60"
+            >
+              <span className="grid h-20 w-20 place-items-center rounded-full bg-white/95 text-black shadow-2xl transition active:scale-95">
+                <PlayIcon className="ml-1 h-10 w-10" />
+              </span>
+            </button>
           )}
 
           {state.status === 'offline' && (
@@ -200,7 +222,7 @@ function Player({ channel, catalog }: { channel: Channel; catalog: CatalogData }
                 <div key={s.url} className="flex items-center justify-between gap-3">
                   <span className="truncate text-xs text-white/50">
                     Stream {i + 1}
-                    {s.quality ? ` · ${s.quality}p` : ''} · {new URL(s.url).hostname}
+                    {s.quality ? ` · ${s.quality}p` : ''} · {hostnameOf(s.url)}
                   </span>
                   <CopyButton url={s.url} />
                 </div>
@@ -234,7 +256,14 @@ export default function Watch() {
     <div className="pb-4 pt-1">
       <div className="safe-x mx-auto mb-2 max-w-5xl">
         <button
-          onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}
+          // React Router stamps its entry index on history.state — idx 0 means
+          // this is the first in-app entry (deep link), so going back would
+          // leave the site; go Home instead.
+          onClick={() => {
+            const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0
+            if (idx > 0) navigate(-1)
+            else navigate('/')
+          }}
           className="flex items-center gap-1 py-2 text-sm text-white/60 transition hover:text-white"
         >
           <ChevronLeftIcon className="h-5 w-5" />

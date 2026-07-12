@@ -3,7 +3,16 @@ import { searchChannels, useCatalog } from '../lib/data'
 import { ChannelGrid } from '../components/ChannelGrid'
 import { SearchIcon } from '../components/Icons'
 
-const SUGGESTIONS = ['TV9', 'DD News', 'Colors Kannada', 'Zee Kannada', 'Red Bull TV', 'Aaj Tak']
+const SUGGESTIONS = [
+  'TV9',
+  'DD News',
+  'Colors Kannada',
+  'National Geographic',
+  'FIFA+',
+  'Willow',
+  'Red Bull TV',
+  'Aaj Tak',
+]
 
 export default function Search() {
   const { catalog } = useCatalog()
@@ -39,7 +48,7 @@ export default function Search() {
         />
       </div>
 
-      {query.trim() === '' ? (
+      {deferredQuery.trim() === '' ? (
         <div className="mt-6">
           <p className="text-sm text-white/45">Try one of these:</p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -55,7 +64,7 @@ export default function Search() {
           </div>
         </div>
       ) : results.length === 0 ? (
-        <p className="mt-8 text-sm text-white/45">No channels match “{query}”.</p>
+        <p className="mt-8 text-sm text-white/45">No channels match “{deferredQuery}”.</p>
       ) : (
         <div className="mt-6">
           <p className="mb-4 text-sm text-white/45">

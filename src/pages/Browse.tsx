@@ -21,7 +21,8 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none rounded-xl border border-white/10 bg-panel px-3 py-2 text-sm text-white outline-none transition focus:border-accent/60 sm:w-44"
+        // 16px font: anything smaller makes iOS Safari auto-zoom on focus
+        className="w-full appearance-none rounded-xl border border-white/10 bg-panel px-3 py-2 text-[16px] text-white outline-none transition focus:border-accent/60 sm:w-44"
       >
         <option value="">All</option>
         {options.map((o) => (

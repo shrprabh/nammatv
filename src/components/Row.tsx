@@ -16,7 +16,9 @@ export function Row({
   seeAllTo?: string
 }) {
   if (channels.length === 0) return null
-  const visible = channels.slice(0, ROW_CAP)
+  // Only cap rows that have a "See all" escape hatch — otherwise (e.g. the
+  // Favorites row) every channel must stay reachable by scrolling.
+  const visible = seeAllTo ? channels.slice(0, ROW_CAP) : channels
   const hasMore = seeAllTo && channels.length > visible.length
 
   return (
@@ -35,7 +37,7 @@ export function Row({
           </Link>
         )}
       </div>
-      <div className="row-fade no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1">
+      <div className="row-fade no-scrollbar safe-x flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1">
         {visible.map((c) => (
           <ChannelCard key={c.id} channel={c} className="w-36 shrink-0 snap-start sm:w-44" />
         ))}

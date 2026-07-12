@@ -129,7 +129,11 @@ export function channelScore(c: Channel): number {
 }
 
 export function rankChannels(channels: Channel[]): Channel[] {
-  return [...channels].sort((a, b) => channelScore(b) - channelScore(a))
+  // Decorate-sort-undecorate: scores are computed once per channel, not per comparison.
+  return channels
+    .map((c) => [channelScore(c), c] as const)
+    .sort((a, b) => b[0] - a[0])
+    .map(([, c]) => c)
 }
 
 // ---------- Search ----------

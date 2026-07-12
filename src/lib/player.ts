@@ -13,9 +13,11 @@ import { recordRecent, recordStreamFailure, recordStreamSuccess, streamFailCount
  *
  * On a fatal error the controller records the failure and auto-advances to the
  * channel's next stream; when all are exhausted the status becomes 'offline'.
+ * A fully blocked autoplay (iOS Low Power Mode, strict browser settings) is
+ * NOT treated as a dead stream — it pauses in 'blocked' until the user taps.
  */
 
-export type PlaybackStatus = 'loading' | 'playing' | 'offline'
+export type PlaybackStatus = 'loading' | 'playing' | 'blocked' | 'offline'
 
 export interface PlayerState {
   status: PlaybackStatus
@@ -55,6 +57,8 @@ interface LoadSession {
   hls?: Hls
   watchdog?: ReturnType<typeof setTimeout>
   cleanupListeners?: () => void
+  /** Declared here so tapToPlay() can re-arm the watchdog for this session. */
+  fail?: () => void
 }
 
 export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, channel: Channel) {
@@ -109,6 +113,7 @@ export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, ch
         recordStreamFailure(stream.url)
         void load(index + 1, list)
       }
+      session.fail = fail
 
       const succeed = () => {
         if (session.cancelled) return
@@ -118,18 +123,27 @@ export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, ch
         setState((prev) => ({ ...prev, status: 'playing' }))
       }
 
+      const isNotAllowed = (err: unknown) =>
+        err instanceof DOMException && err.name === 'NotAllowedError'
+
       const startPlayback = () => {
         if (session.cancelled) return
+        // Fresh attempt with sound — clears any muted fallback from a previous stream.
+        video.muted = false
         video.play().catch((err: unknown) => {
-          if (session.cancelled) return
-          if (err instanceof DOMException && err.name === 'NotAllowedError') {
-            // Autoplay with sound blocked — retry muted, surface tap-to-unmute.
-            video.muted = true
-            setState((prev) => ({ ...prev, mutedFallback: true }))
-            video.play().catch(() => {
-              /* user can press play via native controls */
-            })
-          }
+          if (session.cancelled || !isNotAllowed(err)) return
+          // Autoplay with sound blocked — retry muted, surface tap-to-unmute.
+          video.muted = true
+          setState((prev) => ({ ...prev, mutedFallback: true }))
+          video.play().catch((err2: unknown) => {
+            if (session.cancelled || !isNotAllowed(err2)) return
+            // Autoplay fully blocked (iOS Low Power Mode, strict settings).
+            // The stream is fine — stop the watchdog and wait for a tap
+            // instead of failing over and recording bogus failures.
+            if (session.watchdog) clearTimeout(session.watchdog)
+            video.muted = false
+            setState((prev) => ({ ...prev, status: 'blocked', mutedFallback: false }))
+          })
         })
       }
 
@@ -137,6 +151,7 @@ export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, ch
 
       const onPlaying = () => succeed()
       video.addEventListener('playing', onPlaying)
+      session.cleanupListeners = () => video.removeEventListener('playing', onPlaying)
 
       if (useNative) {
         const onError = () => fail()
@@ -152,12 +167,18 @@ export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, ch
         const { default: HlsClass } = await import('hls.js')
         if (session.cancelled) return
         if (!HlsClass.isSupported()) {
-          // No MSE at all (very old browser) — nothing we can do.
-          session.cleanupListeners = () => video.removeEventListener('playing', onPlaying)
+          // No MSE at all (very old browser) — nothing we can do; don't let
+          // the watchdog spin through streams recording bogus failures.
+          if (session.watchdog) clearTimeout(session.watchdog)
           setState((prev) => ({ ...prev, status: 'offline' }))
           return
         }
-        const retry = { maxNumRetry: 1, retryDelayMs: 500, maxRetryDelayMs: 1000, backoff: 'linear' as const }
+        const retry = {
+          maxNumRetry: 1,
+          retryDelayMs: 500,
+          maxRetryDelayMs: 1000,
+          backoff: 'linear' as const,
+        }
         const noRetry = { ...retry, maxNumRetry: 0 }
         const tightPolicy = {
           default: {
@@ -184,7 +205,6 @@ export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, ch
           fail()
         })
         hls.on(HlsClass.Events.MANIFEST_PARSED, startPlayback)
-        session.cleanupListeners = () => video.removeEventListener('playing', onPlaying)
         hls.loadSource(stream.url)
         hls.attachMedia(video)
       }
@@ -212,6 +232,21 @@ export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, ch
     [load, streams],
   )
 
+  /** User gesture after a fully blocked autoplay — resume with the watchdog re-armed. */
+  const tapToPlay = useCallback(() => {
+    const video = videoRef.current
+    const session = sessionRef.current
+    if (!video || !session || session.cancelled) return
+    setState((prev) => ({ ...prev, status: 'loading' }))
+    if (session.watchdog) clearTimeout(session.watchdog)
+    if (session.fail) session.watchdog = setTimeout(session.fail, WATCHDOG_MS)
+    video.play().catch(() => {
+      if (session.cancelled) return
+      if (session.watchdog) clearTimeout(session.watchdog)
+      setState((prev) => ({ ...prev, status: 'blocked' }))
+    })
+  }, [videoRef])
+
   const unmute = useCallback(() => {
     const video = videoRef.current
     if (!video) return
@@ -225,6 +260,7 @@ export function usePlayer(videoRef: React.RefObject<HTMLVideoElement | null>, ch
     externalStreams: streams.filter((s) => !isStreamPlayable(s)),
     retry,
     switchToStream,
+    tapToPlay,
     unmute,
   }
 }
